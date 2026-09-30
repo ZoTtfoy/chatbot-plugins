@@ -16,7 +16,7 @@
 """
 
 NAME = "网页监控推送"
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 DESCRIPTION = "定时盯一个网页，内容有变化就通知你。可选让模型判断「这次变化值不值得通知」。"
 AUTHOR = "ChatBot 内置示例"
 
@@ -41,12 +41,13 @@ CONFIG_SCHEMA = [
     {"key": "change_mode", "type": "select", "label": "什么算「变化」", "default": "any",
      "options": [
          {"value": "any", "label": "内容变了就通知"},
-         {"value": "keyword", "label": "出现指定关键词才通知"},
-         {"value": "model", "label": "让模型判断值不值得通知"},
-     ]},
+         {"value": "keyword", "label": "页面出现关键词就通知（不看有没有变化）"},
+         {"value": "model", "label": "内容变了、且模型判断值得通知"},
+     ],
+     "help": "选「关键词」时：关键词新出现就通知一次，一直挂在页面上不会反复打扰你"},
     {"key": "keywords", "type": "text", "label": "关键词（change_mode 选关键词时用）",
      "rows": 3, "default": "", "placeholder": "降价\n有货\n已发布",
-     "help": "一行一个，出现任意一个就通知"},
+     "help": "一行一个，出现任意一个就通知（只在该关键词「新出现」时推一次）"},
     {"key": "notify_message", "type": "text", "label": "通知文案", "rows": 3,
      "default": "你盯的页面有变化了：{url}\n变化摘要：{summary}",
      "help": "可用占位符：{url} 网址、{summary} 变化摘要、{old} 旧内容片段、{new} 新内容片段"},
@@ -101,10 +102,14 @@ async def apply(ctx, config):
         urls = current_urls()
         if not urls:
             return "还没配置网址。去面板「插件」页填上要盯的页面（一行一个）。"
-        lines = []
+        mode = str(config.get("change_mode") or "any")
+        lines = [f"监控方式：{mode}"]
         for url in urls:
             recorded = bool(ctx.store_get(f"hash:{url}"))
             lines.append(f"· {url}（{'已记录基线' if recorded else '等第一次抓取'}）")
+        if mode == "keyword":
+            kws = [k for k in _parse_list(config.get("keywords"), limit=50) if k]
+            lines.append("关键词：" + ("、".join(kws) if kws else "（没填，不会通知）"))
         return "\n".join(lines)
 
     urls = current_urls()
@@ -113,13 +118,16 @@ async def apply(ctx, config):
             "还没有配置网址，暂时不会监控任何页面。"
             "去面板「插件」页填上要盯的页面即可生效（不用重载插件）。"
         )
-        return
+        # ★ 这里**不能 return**。以前就是 return 掉的，结果 ctx.every 压根没挂 ——
+        #   用户后来在面板里填好网址（配置是实时读的，确实立刻能看到），
+        #   但**永远不会有任何一次定时检查发生**，只能靠手动 /watch-now。
+        #   空配置也要把定时器挂上，由 check_all 每轮自己去看有没有网址。
+    else:
+        ctx.log.info(f"开始盯 {len(urls)} 个页面，每 {interval // 60} 分钟一次")
 
     @ctx.every(interval)
     async def _tick():
         await check_all()
-
-    ctx.log.info(f"开始盯 {len(urls)} 个页面，每 {interval // 60} 分钟一次")
 
 
 async def _check_one(ctx, config, url):
@@ -144,34 +152,69 @@ async def _check_one(ctx, config, url):
     digest = hashlib.sha1(text.encode("utf-8", errors="ignore")).hexdigest()
     old_digest = ctx.store_get(f"hash:{url}")
     old_text = str(ctx.store_get(f"text:{url}") or "")
-    ctx.store_set(f"text:{url}", text[:8000])
+    mode = str(config.get("change_mode") or "any")
 
+    # ---- 关键词模式：**不要求内容发生变化** ----
+    # ★ 用户填「有货 / 降价」时，心里想的是"页面上一出现就告诉我"，
+    #   而不是"页面变化、且变化后刚好命中"。原来的实现要求两者同时成立 ——
+    #   于是"有货"这两个字挂在页面上不动，就永远不会通知。
+    #   这里改成盯着关键词的**出现/消失**：新出现才通知，一直在就不重复打扰。
+    if mode == "keyword":
+        keywords = [k for k in _parse_list(config.get("keywords"), limit=50) if k]
+        hit = sorted(k for k in keywords if k in text)
+        prev = sorted(str(x) for x in (ctx.store_get(f"kw:{url}") or []))
+        ctx.store_set(f"kw:{url}", hit)
+        # 基线仍然要维护：以后切回「内容变了就通知」时才不会把整页当成新变化
+        if old_digest is None:
+            ctx.store_set(f"hash:{url}", digest)
+            ctx.store_set(f"text:{url}", text[:8000])
+        elif old_digest != digest:
+            ctx.store_set(f"hash:{url}", digest)
+            ctx.store_set(f"text:{url}", text[:8000])
+
+        if not keywords:
+            ctx.log.warn(f"{url}：change_mode 是「关键词」但没填关键词，这个页面不会通知")
+            return
+        if not hit:
+            return
+        if hit == prev:
+            ctx.log.info(f"{url} 关键词仍在命中（{'、'.join(hit)}），不重复通知")
+            return
+        newly = [k for k in hit if k not in prev]
+        summary = "新出现：" + "、".join(newly) if newly else "命中：" + "、".join(hit)
+        await _notify(ctx, config, url, summary, old_text, text)
+        return
+
+    # ---- 内容变化模式 ----
     if old_digest is None:
         ctx.store_set(f"hash:{url}", digest)
+        ctx.store_set(f"text:{url}", text[:8000])
         ctx.log.info(f"已记录 {url} 的基线（第一次抓取，不通知）")
         return
     if old_digest == digest:
+        # ★ 内容没变就别重写那 8000 字的缓存：这是每轮都发生的事，
+        #   白写一遍磁盘纯属浪费（页面 10 分钟才看一次，但一年下来也是几十万次）
         return
 
     ctx.store_set(f"hash:{url}", digest)
+    ctx.store_set(f"text:{url}", text[:8000])
 
-    summary = _diff_summary(old_text, text)
-    mode = str(config.get("change_mode") or "any")
+    # ★ 差异计算丢线程池：SequenceMatcher 最坏是 O(n·m)，
+    #   8000 字规模能跑到几百毫秒，直接在事件循环里算会把消息通道卡住。
+    summary = await ctx.to_thread(_diff_summary, old_text, text)
 
-    if mode == "keyword":
-        keywords = _parse_list(config.get("keywords"), limit=50)
-        hit = [k for k in keywords if k and k in text]
-        if not hit:
-            ctx.log.info(f"{url} 有变化但没命中关键词，跳过")
-            return
-        summary = f"命中关键词：{'、'.join(hit)}；{summary}"
-    elif mode == "model":
+    if mode == "model":
         verdict = await _ask_worth(ctx, url, old_text, text)
         if not verdict["worth"]:
             ctx.log.info(f"{url} 有变化，模型判断不值得通知：{verdict['reason'][:40]}")
             return
         summary = verdict["summary"] or summary
 
+    await _notify(ctx, config, url, summary, old_text, text)
+
+
+async def _notify(ctx, config, url, summary, old_text, text):
+    """按模板组装并发出通知。"""
     template = str(config.get("notify_message") or "{url} 有变化")
     message = (
         template.replace("{url}", url)
@@ -238,16 +281,54 @@ async def _note_failure(ctx, url, reason):
             await ctx.send(target, f"⚠️ 这个页面连续 5 次抓不到了：{url}\n原因：{reason}")
 
 
-def _diff_summary(old_text, new_text):
-    """给出一句人话的变化摘要（不追求精确 diff，够看懂就行）。"""
+def _diff_summary(old_text, new_text, limit=6000):
+    """给一句人话的变化摘要。
+
+    ★ 以前只报「内容变长了 / 变短了」。用户盯着商品价格，收到的却是
+      「内容变长了（1200 → 1210 字）」—— 等于什么都没说，还得自己点开看。
+      这里用 difflib 把**真正新增和被删掉的片段**摘出来，纯本地计算，不花钱。
+
+    ★ autojunk=False：默认的 autojunk 会把高频字符当噪声丢掉，中文页面里
+      「的了是在」这种字一多，diff 结果会明显变糙。
+      代价是最坏 O(n·m) —— 所以调用方必须丢线程池（见 _check_one）。
+    """
     if not old_text:
         return "首次记录后的第一次变化"
-    old_len, new_len = len(old_text), len(new_text)
-    if new_len > old_len:
-        return f"内容变长了（{old_len} → {new_len} 字）"
-    if new_len < old_len:
-        return f"内容变短了（{old_len} → {new_len} 字）"
-    return "内容有改动（长度没变）"
+
+    import difflib
+
+    a, b = old_text[:limit], new_text[:limit]
+    added: list = []
+    removed: list = []
+    try:
+        matcher = difflib.SequenceMatcher(None, a, b, autojunk=False)
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+            if tag in ("replace", "insert"):
+                piece = _trim(b[j1:j2])
+                if piece:
+                    added.append(piece)
+            if tag in ("replace", "delete"):
+                piece = _trim(a[i1:i2])
+                if piece:
+                    removed.append(piece)
+    except Exception:  # noqa: BLE001 - diff 失败不能拖累通知本身
+        return f"内容有改动（{len(old_text)} → {len(new_text)} 字）"
+
+    parts = []
+    if added:
+        parts.append("新增 " + " / ".join(added[:3]) + ("…" if len(added) > 3 else ""))
+    if removed:
+        parts.append("消失 " + " / ".join(removed[:3]) + ("…" if len(removed) > 3 else ""))
+    tail = f"（{len(old_text)} → {len(new_text)} 字）"
+    if not parts:
+        return "内容有改动，但看不出具体增删" + tail
+    return "；".join(parts) + tail
+
+
+def _trim(piece, limit=80):
+    """把差异片段压成一行短文本（换行/连续空白会让通知看起来一坨）。"""
+    text = " ".join(str(piece or "").split())
+    return text[:limit] + ("…" if len(text) > limit else "")
 
 
 def _pick_target(ctx):

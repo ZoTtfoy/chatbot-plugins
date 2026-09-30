@@ -9,7 +9,7 @@
 """
 
 NAME = "定时提醒"
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 DESCRIPTION = "每天固定时间私聊提醒你（可设多个时间点、可只工作日提醒）。适合吃药、喝水、开会、打卡。"
 AUTHOR = "ChatBot 内置示例"
 
@@ -44,6 +44,12 @@ CONFIG_SCHEMA = [
 
 
 def _parse_times(raw):
+    """解析「一行一个 HH:MM」。
+
+    ★ 越界的时间要挡掉：`25:99` 这种以前会被原样收下，界面显示一个不存在的
+      时间点，而底层的定时器又会把它夹回 23:59 —— 用户看到的时间和实际生效的
+      时间对不上，是最难查的一类问题。解析不了的直接跳过，不猜。
+    """
     out = []
     for line in str(raw or "").splitlines():
         text = line.strip()
@@ -52,9 +58,11 @@ def _parse_times(raw):
         # 容错：允许「9:5」这种不规范写法，补齐成 09:05
         try:
             hour, _, minute = text.partition(":")
-            out.append(f"{int(hour):02d}:{int(minute or 0):02d}")
+            h, m = int(hour), int(minute or 0)
         except ValueError:
             continue
+        if 0 <= h <= 23 and 0 <= m <= 59:
+            out.append(f"{h:02d}:{m:02d}")
     return out
 
 
@@ -69,27 +77,40 @@ async def apply(ctx, config):
     times = _parse_times(config.get("times"))
     if not times:
         ctx.log.warn("没有解析出任何提醒时间，插件不会做任何事（请在面板里填写）")
+    else:
+        # 有写错的行就明确点出来 —— 静默丢掉用户填的时间是最招人烦的行为
+        given = [x for x in str(config.get("times") or "").splitlines() if x.strip()]
+        if len(given) > len(times):
+            ctx.log.warn(f"有 {len(given) - len(times)} 行提醒时间格式不对已忽略"
+                         f"（要 HH:MM，24 小时制）")
 
     async def remind(label):
         if bool(config.get("weekdays_only")) and time.localtime().tm_wday >= 5:
             return
+
+        # ★ 顺序很重要：**先做完所有「这次能不能发」的判断，最后才落幂等戳**。
+        #   以前是先落戳再校验，结果文案没填 / 还没有任何会话时，这一天就被
+        #   标记成"已提醒"了 —— 用户改完配置也等不到当天的提醒，而且日志里
+        #   只留一句"跳过"，很难反应过来是被幂等戳吃掉的。
+        text = str(config.get("message") or "").strip()
+        if not text:
+            ctx.log.warn(f"提醒内容为空，{label} 这次不提醒（去面板填一下）")
+            return
+        target = _pick_target(ctx, config)
+        if target is None:
+            ctx.log.info("还没有任何会话跟机器人说过话，这次提醒跳过")
+            return
+
         # ★ 幂等保护：ctx.at 是「每天到点跑一次」，但改配置/重载插件会让
         #   定时器重算，极端情况下同一分钟内可能跑两次。用落盘的日期记一笔，
         #   同一天同一个时间点只提醒一次。
+        #   戳必须落在 await 之前：await 会让出事件循环，两次重入就会都通过检查。
         stamp_key = f"sent:{label}"
         today = time.strftime("%Y-%m-%d")
         if ctx.store_get(stamp_key) == today:
             return
         ctx.store_set(stamp_key, today)
 
-        text = str(config.get("message") or "").strip()
-        if not text:
-            return
-
-        target = _pick_target(ctx, config)
-        if target is None:
-            ctx.log.info("还没有任何会话跟机器人说过话，这次提醒跳过")
-            return
         if await ctx.send(target, text):
             ctx.log.info(f"已提醒（{label}）-> {target.get('who') or target.get('channel')}")
 

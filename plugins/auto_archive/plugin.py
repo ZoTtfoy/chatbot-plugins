@@ -22,7 +22,7 @@
 """
 
 NAME = "消息留档 / 归档"
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 DESCRIPTION = "把每个会话的消息按日期归档成 markdown 到本地目录，方便检索和备份（图片/语音记为占位）。"
 AUTHOR = "ChatBot 内置示例"
 
@@ -56,9 +56,35 @@ CONFIG_SCHEMA = [
 
 async def apply(ctx, config):
     import time
-    from pathlib import Path
 
     base = str(config.get("dir") or "archive")
+
+    def size_of(rel):
+        """当前文件多少字节（不存在就是 0）。
+
+        ★ 这里直接对 ``ctx.fs.resolve()`` 出来的 Path 做 stat：它已经过
+          越界校验，是插件自己写得进去的文件，读一下大小不算越权。
+        """
+        try:
+            target = ctx.fs.resolve(rel, "查看归档文件")
+            return target.stat().st_size if target.is_file() else 0
+        except Exception:  # noqa: BLE001
+            return 0
+
+    def overflow_name(name):
+        """超过大小上限时的下一个文件名。
+
+        ★ 必须带序号：原来用 ``int(time.time())`` 拼后缀，同一秒内来的第二条
+          消息会算出**同一个名字**，把刚写进去的那份直接覆盖掉 ——
+          刷屏的时候恰好是最需要留档的时候。
+        """
+        stem = name[:-3] if name.endswith(".md") else name
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        for seq in range(1, 1000):
+            candidate = f"{stem}-{stamp}-{seq}.md"
+            if size_of(f"{base}/{candidate}") == 0:
+                return candidate
+        return f"{stem}-{stamp}-{time.time_ns()}.md"
 
     async def archive(session):
         text = (session.text or "").strip()
@@ -83,13 +109,18 @@ async def apply(ctx, config):
         try:
             # ★ 用 fs 能力而不是裸 open()：路径会被限制在允许的目录里，
             #   写错目录会立刻报错，而不是悄悄写到系统盘某个角落。
-            current = ctx.fs.read_text(rel) if ctx.fs.exists(rel) else ""
+            #
+            # ★ 追加写（append）而不是「读全文 → 拼一行 → 写回全文」。
+            #   这个插件挂在**每条消息**上，原来那种写法在一个热闹的群里
+            #   就是每条消息两次全量磁盘 IO，而且文件越大越慢（总量是平方级）。
+            #   追加是 O(1)，代价只是要在换文件时 stat 一下大小。
             limit = max(16, int(config.get("max_file_kb") or 512)) * 1024
-            if len(current.encode("utf-8", errors="ignore")) > limit:
-                rel = f"{base}/{name[:-3]}-{int(time.time())}.md"
-                current = ""
-            header = f"# 归档 {session.who}（{session.channel}）\n\n" if not current else ""
-            ctx.fs.write_text(rel, header + current + line)
+            if size_of(rel) > limit:
+                rel = f"{base}/{overflow_name(name)}"
+
+            header = f"# 归档 {session.who}（{session.channel}）\n\n"
+            chunk = (header if size_of(rel) == 0 else "") + line
+            ctx.fs.write_text(rel, chunk, append=True)
         except Exception as exc:  # noqa: BLE001
             ctx.log.warn(f"归档失败：{exc}")
 
@@ -97,11 +128,11 @@ async def apply(ctx, config):
     async def on_message(session):
         await archive(session)
 
-    @ctx.command("archive-here", help="把当前会话此前的记录归档一次（测试用）", admin_only=True)
+    @ctx.command("archive-here", help="把当前这条消息再归档一次（测试用）", admin_only=True)
     async def cmd_here(session, args):
         await archive(session)
         target = ctx.fs.resolve(base, "查看归档目录")
-        return f"已归档到 {target}"
+        return f"已按当前配置归档。目录：{target}"
 
     @ctx.command("archive-dir", help="看看归档目录在哪")
     async def cmd_dir(session, args):

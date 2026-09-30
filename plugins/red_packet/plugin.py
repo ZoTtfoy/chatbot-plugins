@@ -36,7 +36,7 @@
 """
 
 NAME = "红包助手"
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 DESCRIPTION = ("默认只提醒你「有红包来了」，不会碰你的鼠标。"
                "自动抢需要你显式开启并单独授权 —— 它违反腾讯用户协议、有封号风险，"
                "而且纯 UI 方案不可能 100% 点中，请先开 dry_run 观察。")
@@ -120,7 +120,9 @@ def _is_red_packet(session):
     """
     text = str(getattr(session, "text", "") or "")
     low = text.lower()
-    if "<wcpayinfo" in low or "<msg><appmsg" in low and "红包" in text:
+    # ★ 括号不能省：`a or b and c` 在 Python 里是 `a or (b and c)`，
+    #   不写括号时这段判断的对错全靠记优先级，改一行就可能反掉。
+    if "<wcpayinfo" in low or ("<msg><appmsg" in low and "红包" in text):
         return True
     if "微信红包" in text or "[微信红包]" in text:
         return True
@@ -165,15 +167,23 @@ def _whitelist(config):
 
 
 async def apply(ctx, config):
-    import asyncio
     import time
 
-    mode = str(config.get("mode") or "notify")
-    dry_run = bool(config.get("dry_run", True))
+    # ★ 模式与演练开关**每次现读**，不在启用时快照。
+    #   配置对象是就地更新的（manager.save_config），所以用户在面板里把
+    #   「只提醒」改成「自动抢」、或者关掉 dry_run，下一条消息就按新的走 ——
+    #   不用等重载。（切到 grab 会因为要新权限而被自动停用等待授权，
+    #   用户在面板上重新授权后这次读到的就是 grab 了。）
+    def mode_now():
+        return str(config.get("mode") or "notify")
+
+    def dry_run_now():
+        return bool(config.get("dry_run", True))
 
     async def on_message(session):
         if not _is_red_packet(session):
             return
+        mode, dry_run = mode_now(), dry_run_now()
         ctx.log.info(f"检测到红包（{session.where}，模式={mode}{'，演练' if dry_run else ''}）")
 
         # ---- 只提醒：不需要任何权限 ----
@@ -215,6 +225,7 @@ async def apply(ctx, config):
     async def cmd_status(session, args):
         used_hour = int(ctx.store_get(_hour_key(), 0) or 0)
         used_day = int(ctx.store_get(_day_key(), 0) or 0)
+        mode, dry_run = mode_now(), dry_run_now()
         lines = [
             f"模式：{mode}",
             f"演练：{'是（不会真点）' if dry_run else '否（会真的点鼠标）'}",
@@ -233,6 +244,7 @@ async def apply(ctx, config):
         await on_message(session)
         return "已按当前配置走了一遍流程，结果见运行日志。"
 
+    mode, dry_run = mode_now(), dry_run_now()
     ctx.log.info(
         f"红包助手已启用：模式={mode}，演练={'开' if dry_run else '关'}"
         + ("；⚠️ 已开启自动抢，风险自负" if mode == "grab" and not dry_run else "")

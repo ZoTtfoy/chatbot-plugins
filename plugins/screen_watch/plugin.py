@@ -19,7 +19,7 @@
 """
 
 NAME = "屏幕监控告警"
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 DESCRIPTION = "定时截屏交给模型判断，屏幕上出现你指定的内容就通知你。只读屏幕，不动鼠标键盘。"
 AUTHOR = "ChatBot 内置示例"
 
@@ -72,11 +72,16 @@ async def apply(ctx, config):
     import re
     import time
 
-    region = _parse_region(config.get("region"))
+    def current_region():
+        # 每次现读：改完区域不用重载插件（配置是就地更新的）
+        return _parse_region(config.get("region"))
 
-    async def check():
+    async def check(say=None):
+        """看一次屏幕。``say`` 传了函数就把结论回给调用方（手动触发时用）。"""
         question = str(config.get("question") or "").strip()
         if not question:
+            if say:
+                say("还没填「要判断什么」，没法看。去面板里写一句大白话。")
             return
 
         if bool(config.get("only_when_idle")):
@@ -85,18 +90,24 @@ async def apply(ctx, config):
             except Exception:  # noqa: BLE001
                 idle = 999
             if idle < 60:
+                if say:
+                    say(f"你正在用电脑（{idle:.0f} 秒前还在动鼠标），按配置这次跳过。")
                 return
 
         # ★ 截图是阻塞操作，必须丢线程池 —— 否则整个消息通道跟着卡住
         try:
-            png = await ctx.to_thread(ctx.desktop.screenshot, region)
+            png = await ctx.to_thread(ctx.desktop.screenshot, current_region())
         except Exception as exc:  # noqa: BLE001
             ctx.log.warn(f"截屏失败：{exc}")
+            if say:
+                say(f"截屏失败：{exc}")
             return
 
         block = await ctx.image_block(png)
         if block is None:
             ctx.log.warn("截图无法转成模型能看的内容块，本轮跳过")
+            if say:
+                say("截图转不出模型能看的内容块（图片处理组件可能没装好），这次跳过。")
             return
 
         prompt = (
@@ -111,20 +122,33 @@ async def apply(ctx, config):
             )
         except Exception as exc:  # noqa: BLE001
             ctx.log.warn(f"模型判断失败：{exc}")
+            if say:
+                say(f"模型判断失败：{exc}")
             return
         if not raw:
+            if say:
+                say("模型没返回内容，这次跳过（看运行日志）。")
             return
 
         match = re.search(r"\{.*\}", raw, re.S)
         if not match:
             ctx.log.warn(f"模型输出无法解析，跳过：{raw[:80]}")
+            if say:
+                say(f"模型输出解析不了，这次跳过：{raw[:80]}")
             return
         try:
             data = json.loads(match.group(0))
         except Exception:  # noqa: BLE001
             ctx.log.warn(f"模型输出不是合法 JSON，跳过：{raw[:80]}")
+            if say:
+                say(f"模型输出不是合法 JSON，这次跳过：{raw[:80]}")
             return
+
+        reason = str(data.get("reason") or "屏幕出现你关注的内容")
         if not data.get("hit"):
+            ctx.log.info(f"看了一眼，没命中（{reason[:40]}）")
+            if say:
+                say(f"没命中。模型的判断：{reason}")
             return
 
         # 静默期：同一个问题持续存在时别一直通知
@@ -132,17 +156,25 @@ async def apply(ctx, config):
         last = float(ctx.store_get("last_hit", 0) or 0)
         if time.time() - last < cooldown:
             ctx.log.info("命中但还在静默期内，跳过通知")
+            if say:
+                say(f"命中了（{reason}），但还在静默期里，这次不重复通知。")
             return
         ctx.store_set("last_hit", time.time())
 
-        reason = str(data.get("reason") or "屏幕出现你关注的内容")
         template = str(config.get("notify_message") or "⚠️ 屏幕监控命中：{reason}")
         target = _pick_target(ctx)
         if target is None:
             ctx.log.info(f"命中（{reason}）但还没有可通知的会话")
+            if say:
+                say(f"命中了（{reason}），但还没有任何会话跟机器人说过话，没地方通知。")
             return
-        if await ctx.send(target, template.replace("{reason}", reason)):
+        text = template.replace("{reason}", reason)
+        if await ctx.send(target, text):
             ctx.log.info(f"已发出屏幕告警：{reason}")
+            if say:
+                say(f"命中并已通知：{reason}")
+        elif say:
+            say(f"命中（{reason}）但发送失败，看运行日志。")
 
     interval = max(20, int(config.get("interval_seconds") or 120))
 
@@ -150,13 +182,13 @@ async def apply(ctx, config):
     async def _tick():
         await check()
 
-    @ctx.command("screen-now", help="立刻看一次屏幕", admin_only=True)
+    @ctx.command("screen-now", help="立刻看一次屏幕并给出判断结论", admin_only=True)
     async def cmd_now(session, args):
-        try:
-            png = await ctx.to_thread(ctx.desktop.screenshot, region)
-        except Exception as exc:  # noqa: BLE001
-            return f"截屏失败：{exc}"
-        return f"截屏成功，{len(png) // 1024} KB。判断结果见运行日志。"
+        holder = []
+        # ★ 以前这里只截了张图就回「判断结果见运行日志」，但根本没跑判断 ——
+        #   用户点完以为查过了，其实什么都没发生。现在真的走一遍完整流程。
+        await check(say=holder.append)
+        return holder[0] if holder else "这次没有产生结论（看运行日志）。"
 
     @ctx.command("screen-size", help="看看屏幕分辨率")
     async def cmd_size(session, args):
@@ -164,9 +196,14 @@ async def apply(ctx, config):
             w, h = await ctx.to_thread(ctx.desktop.screen_size)
         except Exception as exc:  # noqa: BLE001
             return f"读取失败：{exc}"
-        return f"屏幕分辨率：{w} x {h}"
+        region = current_region()
+        return (f"屏幕分辨率：{w} x {h}"
+                + (f"；当前只看区域 {region}" if region else "；当前看整屏"))
 
-    ctx.log.info(f"屏幕监控已开启，每 {interval} 秒看一眼（{'只读屏幕' if True else ''}）")
+    ctx.log.info(
+        f"屏幕监控已开启，每 {interval} 秒看一眼"
+        f"（只读屏幕，不动鼠标键盘；只看 {current_region() or '整屏'}）"
+    )
 
 
 def _idle_seconds():

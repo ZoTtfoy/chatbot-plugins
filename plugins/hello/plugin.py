@@ -15,7 +15,7 @@
 """
 
 NAME = "示例：打个招呼"
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 DESCRIPTION = "演示插件的最小写法：加一个 /hello 指令，回复可以自己配。"
 AUTHOR = "ChatBot 内置示例"
 
@@ -44,18 +44,25 @@ CONFIG_SCHEMA = [
 
 
 async def apply(ctx, config):
+    import time
+
     ctx.log.info("示例插件已加载")
 
-    @ctx.command("hello", aliases=("hi", "你好"), help="打个招呼", admin_only=bool(config["admin_only"]))
+    # ★ 回复内容每次现读配置：在面板里改完「回复内容」，下一条消息就生效。
+    #   注意 admin_only 是**注册时**定下的（它是指令本身的属性，不是运行时判断），
+    #   改它需要在面板上点一下「重新加载」—— 下面日志里会提醒这一点。
+    @ctx.command("hello", aliases=("hi", "你好"), help="打个招呼",
+                 admin_only=bool(config["admin_only"]))
     async def cmd_hello(session, args):
         """处理函数签名固定是 (session, args)。
 
         session 里带 channel / is_group / sender / is_admin 这些身份信息，
         返回值是字符串就自动发给用户（返回 None 则什么都不发）。
         """
+        greeting = str(config.get("greeting") or "").strip() or "（回复内容为空，去面板填一下）"
         # 参数也可以用起来：/hello 后面的文字都在 args 里
         tail = f"（你说的是「{args}」）" if args else ""
-        return f"{config['greeting']}{tail}"
+        return f"{greeting}{tail}"
 
     @ctx.on("start")
     async def on_start():
@@ -65,4 +72,4 @@ async def apply(ctx, config):
     @ctx.on("stop")
     async def on_stop():
         # 插件被停用时触发。这里落一下数据，下次启用还能接着用。
-        ctx.store_set("last_stop_at", __import__("time").time())
+        ctx.store_set("last_stop_at", time.time())

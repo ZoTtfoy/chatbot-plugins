@@ -1,12 +1,12 @@
 {
   "format": 1,
-  "generated_at": "2026-09-30T08:06:48+00:00",
+  "generated_at": "2026-09-30T09:26:44+00:00",
   "count": 9,
   "plugins": [
     {
       "id": "alarm",
       "name": "定时提醒",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "description": "每天固定时间私聊提醒你（可设多个时间点、可只工作日提醒）。适合吃药、喝水、开会、打卡。",
       "author": "ChatBot 内置示例",
       "root": "plugins/alarm",
@@ -17,16 +17,16 @@
       "files": [
         {
           "path": "plugin.py",
-          "size": 5680,
-          "sha256": "d57fb839985edc0fbfbb0f18ff339fadfca9c18d1070435dc486a5f1d1599951"
+          "size": 7116,
+          "sha256": "e25b70d9fe5a5068352c450a6a927271b7c321e2400f1248e3e4c5514c762ea9"
         }
       ],
-      "total_size": 5680
+      "total_size": 7116
     },
     {
       "id": "auto_archive",
       "name": "消息留档 / 归档",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "description": "把每个会话的消息按日期归档成 markdown 到本地目录，方便检索和备份（图片/语音记为占位）。",
       "author": "ChatBot 内置示例",
       "root": "plugins/auto_archive",
@@ -37,16 +37,16 @@
       "files": [
         {
           "path": "plugin.py",
-          "size": 5238,
-          "sha256": "bf03439dd01ebd3f484fffaffb2e1f6a819e7f4654242a0abd0341106cd39a40"
+          "size": 6697,
+          "sha256": "8e28afc1c5bd6f0ac1aff62e162c93cbb557a6abeaac16e532f6789d56a39d64"
         }
       ],
-      "total_size": 5238
+      "total_size": 6697
     },
     {
       "id": "chat_stats",
       "name": "发言统计",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "description": "统计每个会话里谁说了多少话，用 /stats 查看；可选让模型对榜单点评一句。",
       "author": "ChatBot 内置示例",
       "root": "plugins/chat_stats",
@@ -55,16 +55,16 @@
       "files": [
         {
           "path": "plugin.py",
-          "size": 3093,
-          "sha256": "c05eca2a5492d77e44f132d6995059da21af9fee1208156a6ded249fa36b6028"
+          "size": 7285,
+          "sha256": "3deb1736833db0932a35a435b699feb1419fa8896f70045998d889a362e0ecd6"
         }
       ],
-      "total_size": 3093
+      "total_size": 7285
     },
     {
       "id": "hello",
       "name": "示例：打个招呼",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "description": "演示插件的最小写法：加一个 /hello 指令，回复可以自己配。",
       "author": "ChatBot 内置示例",
       "root": "plugins/hello",
@@ -73,16 +73,16 @@
       "files": [
         {
           "path": "plugin.py",
-          "size": 2626,
-          "sha256": "3480ea8d13b90e4e1b4dbd4fa68f420ed3d7098159e544afe3f6ee33aa9afedf"
+          "size": 3073,
+          "sha256": "650b7fdfc0f0920e44a78b9f3b370822d9ecbc53ed5f5f25ce6d6c1aed199b63"
         }
       ],
-      "total_size": 2626
+      "total_size": 3073
     },
     {
       "id": "keyword_reply",
       "name": "关键词自动回复",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "description": "命中关键词就自动回一句，不再走模型。适合群规、价格、联系方式这类固定问答。",
       "author": "ChatBot 内置示例",
       "root": "plugins/keyword_reply",
@@ -91,16 +91,16 @@
       "files": [
         {
           "path": "plugin.py",
-          "size": 3685,
-          "sha256": "d34cf8d0c02eb3a1789e5111779ba68350fc0f23ae04e31ab33c548142151eb8"
+          "size": 5028,
+          "sha256": "eeb3ad45ecf0b481e1c22d3d7b3e09d43c6871c5045a6f6529f9eac5a1991717"
         }
       ],
-      "total_size": 3685
+      "total_size": 5028
     },
     {
       "id": "red_packet",
       "name": "红包助手",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "description": "默认只提醒你「有红包来了」，不会碰你的鼠标。自动抢需要你显式开启并单独授权 —— 它违反腾讯用户协议、有封号风险，而且纯 UI 方案不可能 100% 点中，请先开 dry_run 观察。",
       "author": "ChatBot 内置示例",
       "root": "plugins/red_packet",
@@ -112,16 +112,16 @@
       "files": [
         {
           "path": "plugin.py",
-          "size": 15307,
-          "sha256": "9a53fd25bd33f9ac11da5a9cd4bbae3bbdf511584735e7d026074b22789969dc"
+          "size": 16110,
+          "sha256": "245320be48bb500bf89c24257a959a727f72da16dc83bfeadec5fb978967a1e2"
         }
       ],
-      "total_size": 15307
+      "total_size": 16110
     },
     {
       "id": "scheduled_broadcast",
       "name": "定时播报",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "description": "每天固定时刻，往最近活跃的会话发一条消息（早安、值班表、每日一句等都行）。",
       "author": "ChatBot 内置示例",
       "root": "plugins/scheduled_broadcast",
@@ -132,16 +132,16 @@
       "files": [
         {
           "path": "plugin.py",
-          "size": 3389,
-          "sha256": "1343a7b865501f228cd088712590c72acf3078fa76a890a948a4bae5fe1ecb75"
+          "size": 5365,
+          "sha256": "f7208fe16d09fe54cac4a9342465578d47cb030d4811d71c38d8d90ccc33a341"
         }
       ],
-      "total_size": 3389
+      "total_size": 5365
     },
     {
       "id": "screen_watch",
       "name": "屏幕监控告警",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "description": "定时截屏交给模型判断，屏幕上出现你指定的内容就通知你。只读屏幕，不动鼠标键盘。",
       "author": "ChatBot 内置示例",
       "root": "plugins/screen_watch",
@@ -153,16 +153,16 @@
       "files": [
         {
           "path": "plugin.py",
-          "size": 7783,
-          "sha256": "f69f3a6e302606ba1700ca520abe0c857b2056c7ee9f733b4be94c6ff895eeb3"
+          "size": 9780,
+          "sha256": "692c3414794a86793574f05ffb4bca6944629f2da4f0750cd488517294a98889"
         }
       ],
-      "total_size": 7783
+      "total_size": 9780
     },
     {
       "id": "web_watch",
       "name": "网页监控推送",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "description": "定时盯一个网页，内容有变化就通知你。可选让模型判断「这次变化值不值得通知」。",
       "author": "ChatBot 内置示例",
       "root": "plugins/web_watch",
@@ -174,11 +174,11 @@
       "files": [
         {
           "path": "plugin.py",
-          "size": 10394,
-          "sha256": "877b38ecfb60d97f1e9f4e9c65262e28579bc9d0aed8ae3b6502fde9dd749a2c"
+          "size": 14936,
+          "sha256": "886a509376861c64e707353da8d1199ff462622b10cb115b25149b704ddb95c8"
         }
       ],
-      "total_size": 10394
+      "total_size": 14936
     }
   ]
 }

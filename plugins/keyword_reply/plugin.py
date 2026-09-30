@@ -11,7 +11,7 @@
 """
 
 NAME = "关键词自动回复"
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 DESCRIPTION = "命中关键词就自动回一句，不再走模型。适合群规、价格、联系方式这类固定问答。"
 AUTHOR = "ChatBot 内置示例"
 
@@ -69,32 +69,57 @@ def _parse_rules(raw):
 
 
 async def apply(ctx, config):
-    rules = _parse_rules(config.get("rules"))
-    exact = bool(config.get("exact"))
-    cooldown = max(0, int(config.get("cooldown") or 0))
-    ctx.log.info(f"已加载 {len(rules)} 条关键词规则")
+    import time
+
+    # ★ 规则「按需解析 + 缓存」：用户在面板改完规则，**下一条消息就生效**，
+    #   不用重载插件（apply 只在启用时跑一次，规则若在启用时解析好就冻住了）。
+    #   缓存按原文比对，没改就复用上一次的结果，不用每条消息都重新解析。
+    cache = {"raw": None, "rules": []}
+
+    def current_rules():
+        raw = str(config.get("rules") or "")
+        if cache["raw"] != raw:
+            cache["raw"] = raw
+            # 长的关键词排前面：「帮助中心」必须先于「帮助」命中 ——
+            # 否则用户特意加了更具体的关键词，也永远轮不到它。
+            cache["rules"] = sorted(
+                _parse_rules(raw).items(), key=lambda kv: len(kv[0]), reverse=True
+            )
+            ctx.log.info(f"关键词规则已生效，共 {len(cache['rules'])} 条")
+        return cache["rules"]
 
     @ctx.middleware(priority=10)
     async def keyword_mw(session, text):
+        rules = current_rules()
         if not rules or not text:
             return None
 
-        hit = None
+        exact = bool(config.get("exact"))
+        cooldown = max(0, int(config.get("cooldown") or 0))
         lowered = text.strip().lower()
-        for keyword, reply in rules.items():
+
+        hit = None
+        for keyword, reply in rules:
             if (lowered == keyword.lower()) if exact else (keyword.lower() in lowered):
                 hit = (keyword, reply)
                 break
         if hit is None:
             return None
 
-        # 冷却：按「会话 + 关键词」记时间戳，避免同一句被反复触发
+        # 冷却：按「会话 + 关键词」记时间戳，避免同一句被反复触发。
+        # ★ 冷却只决定「要不要自动回」，不决定「这条消息要不要给模型」。
+        #   原来这里 return ctx.STOP，等于冷却期内的消息被整个吞掉 ——
+        #   用户连问两次「帮助」，第二次既没有自动回复、模型也收不到，
+        #   从用户视角看就是"机器人突然不说话了"。宁可让模型多回一次，
+        #   也不能静默吞消息。
         if cooldown:
-            key = f"cd:{session.session_key}:{hit[0]}"
-            last = ctx.store_get(key, 0) or 0
-            if __import__("time").time() - float(last) < cooldown:
-                return ctx.STOP  # 冷却中：直接吞掉，别让它再去打扰模型
-            ctx.store_set(key, __import__("time").time())
+            key = f"cd:{session.session_key}:{hit[0].lower()}"
+            now = time.time()
+            last = float(ctx.store_get(key, 0) or 0)
+            if now - last < cooldown:
+                ctx.log.info(f"关键词「{hit[0]}」还在冷却里，这条交给模型处理")
+                return None
+            ctx.store_set(key, now)
 
         await ctx.reply(session, hit[1])
         return ctx.STOP  # 已经回过了，这条消息到此为止
