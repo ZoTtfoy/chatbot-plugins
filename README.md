@@ -7,11 +7,19 @@
 **方式一：在机器人面板里装（推荐）**
 
 1. 打开面板 →「插件」页 →「从插件市场安装」
-2. 填入本仓库 `index.json` 的地址，例如：
+2. 填入本仓库 `index.json` 的地址：
+
    ```
-   https://raw.githubusercontent.com/<你的用户名>/<仓库名>/main/index.json
+   https://cdn.jsdelivr.net/gh/ZoTtfoy/chatbot-plugins@main/index.json
    ```
-   （也可以在 `config.json` 的 `plugins.market_urls` 里预先把地址配上，之后就不用每次填了）
+
+   > ⚠️ **别用 `raw.githubusercontent.com`** —— 实测在国内网络下直接连接失败
+   > （HTTP 000 连不上），jsDelivr 是能通的。想换回 raw 地址的话，先自己 curl 一下确认能通。
+   >
+   > 用 jsDelivr 还有个好处：它会把文件缓存到 CDN，国内访问快很多；
+   > 但代价是**更新有延迟**（通常几分钟，最长约 12 小时）。
+   > 你刚改完插件想立刻生效，就在地址后面加个 `?t=<时间戳>` 绕过缓存。
+
 3. 列表里点「安装」即可。装进来的插件**默认是停用状态**，确认没问题再打开开关。
 
 **方式二：手动**
